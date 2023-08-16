@@ -1,4 +1,4 @@
-# BA Customer Booking Prediction
+# British Airways Customer Booking Prediction
 
 ## About
 
