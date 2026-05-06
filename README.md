@@ -1,25 +1,12 @@
 # British Airways Customer Booking Prediction
 
-> Binary classification predicting booking completion on **50,000 BA records**. Rebuilt with a leak-free `ImbPipeline`, `class_weight='balanced'`, stratified cross-validation, and AUC-ROC evaluation — improving class 1 recall from **0.01 → 0.52** and AUC-ROC to **0.733**.
+> Binary classification model predicting whether a customer will complete a flight booking, trained on **50,000 BA booking records**. Built a leak-free `ImbPipeline` with SMOTE oversampling, `class_weight='balanced'`, and stratified cross-validation — achieving **AUC-ROC: 0.733** and **class 1 recall: 0.52**.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-RandomForest-orange?logo=scikit-learn)
 ![AUC-ROC](https://img.shields.io/badge/AUC--ROC-0.733-brightgreen)
 ![Recall](https://img.shields.io/badge/Class%201%20Recall-0.52-green)
 ![Forage](https://img.shields.io/badge/British%20Airways-Forage%20Virtual%20Internship-005EB8)
-
----
-
-## What Changed vs. the Original Approach
-
-| Issue | Original | This Version |
-|-------|----------|-------------|
-| SMOTE placement | Applied before split (leakage) | Inside `ImbPipeline` — only on training folds |
-| Feature selection | `SelectKBest` on full dataset (leakage) | Removed; all features used with proper regularization |
-| Class handling | SMOTE only | SMOTE + `class_weight='balanced'` |
-| Evaluation metric | Accuracy (misleading) | AUC-ROC, F1, Recall |
-| Cross-validation | Standard KFold | Stratified KFold (preserves class ratio) |
-| Class 1 Recall | **0.01** ❌ | **0.52** ✅ |
 
 ---
 
@@ -53,21 +40,55 @@
 | 2 | `flight_duration` | 0.109 | Longer routes → higher commitment → more completions |
 | 3 | `booking_origin_Australia` | 0.064 | Second-largest origin group |
 | 4 | `sales_channel_Internet` | 0.050 | Internet vs Mobile completion difference |
-| 5 | `booking_origin_Indonesia` | 0.047 | Regional pattern |
+| 5 | `booking_origin_Indonesia` | 0.047 | Regional booking pattern |
 | 6 | `length_of_stay` | 0.040 | Longer trips → more committed bookings |
-| 7 | `route_PENTPE` | 0.039 | Penang–Taipei specific behavior |
+| 7 | `route_PENTPE` | 0.039 | Penang–Taipei route specific behavior |
+
+---
+
+## Dataset
+
+- **Source:** British Airways customer booking data (Forage Virtual Internship)
+- **Records:** 50,000 bookings
+- **Target:** `booking_complete` (0 = not completed, 1 = completed)
+- **Class ratio:** 85% not completed / 15% completed (imbalanced)
+- **No missing values**
+- **Train/Test:** 80% / 20% stratified split
+
+### Features
+
+| Feature | Type | Description |
+|---------|------|-------------|
+| `num_passengers` | int | Number of passengers travelling |
+| `sales_channel` | categorical | Internet vs. Mobile |
+| `trip_type` | categorical | Round Trip / One Way / Circle Trip |
+| `purchase_lead` | int | Days between booking and travel date |
+| `length_of_stay` | int | Nights at destination |
+| `flight_hour` | int | Departure hour (0–23) |
+| `flight_day` | ordinal | Day of week (Mon=1 → Sun=7) |
+| `route` | categorical | Origin–destination code |
+| `booking_origin` | categorical | Country of booking |
+| `wants_extra_baggage` | binary | Add-on preference |
+| `wants_preferred_seat` | binary | Add-on preference |
+| `wants_in_flight_meals` | binary | Add-on preference |
+| `flight_duration` | float | Flight duration in hours |
 
 ---
 
 ## Feature Engineering
 
-Three new features added beyond the original columns:
+Three new features created beyond the original columns:
 
 | Feature | Formula | Rationale |
 |---------|---------|-----------|
-| `addon_count` | `baggage + seat + meals` | Engagement signal — customers selecting more add-ons are more committed |
-| `is_last_minute` | `purchase_lead ≤ 7` | Last-minute bookers may have different dropout rates |
-| `is_weekend_flight` | `flight_day ≥ 6` | Weekend vs weekday booking behavior |
+| `addon_count` | `baggage + seat + meals` | Engagement signal — more add-ons = more committed customer |
+| `is_last_minute` | `purchase_lead ≤ 7` | Last-minute bookers behave differently from planners |
+| `is_weekend_flight` | `flight_day ≥ 6` | Weekend vs weekday booking behavior differs |
+
+Also applied:
+- Rare route grouping: 799 → 217 categories (threshold: < 50 occurrences → "Other")
+- Rare origin grouping: 104 → 20 categories (threshold: < 100 → "Other")
+- One-hot encoding for all categorical columns
 
 ---
 
@@ -77,59 +98,44 @@ Three new features added beyond the original columns:
 Input (50,000 bookings × 14 features)
     ↓
 Feature Engineering
-    → flight_day ordinal encoding
-    → addon_count, is_last_minute, is_weekend_flight
-    → rare route/origin grouping (< 50/100 occurrences → 'Other')
-    → one-hot encoding (sales_channel, trip_type, route, booking_origin)
+    → Ordinal encode flight_day
+    → Create addon_count, is_last_minute, is_weekend_flight
+    → Group rare routes and origins
+    → One-hot encode categoricals
     ↓
-Stratified 80/20 Split (stratify=y preserves 15% class 1 in both sets)
+Stratified 80/20 Split (preserves 15% class 1 in both sets)
     ↓
-ImbPipeline (applied ONLY to training folds):
-    [1] SMOTE(k_neighbors=5)              → oversample minority class
+ImbPipeline (SMOTE applied only inside training folds — no leakage):
+    [1] SMOTE(k_neighbors=5)
     [2] RandomForestClassifier(
             n_estimators=300,
             max_depth=10,
-            class_weight='balanced',      → further imbalance correction
+            class_weight='balanced',
             criterion='entropy'
         )
     ↓
-Evaluation: AUC-ROC, Precision-Recall, F1, Confusion Matrix
+Evaluation: AUC-ROC · Precision-Recall · F1 · Confusion Matrix
 ```
 
 ---
 
 ## Why AUC-ROC, Not Accuracy
 
-With 85% of bookings not completed, a model that always predicts "not completed" achieves **85% accuracy** while being completely useless for the business goal of identifying customers likely to convert.
-
-**AUC-ROC = 0.733** means the model has a 73.3% chance of correctly ranking a completed booking above a non-completed booking — a meaningful performance signal independent of class distribution.
-
-**Recall = 0.52** means the model catches 52% of actual completions — a 51× improvement over the original model's recall of 0.01.
+With 85% of bookings not completed, a model predicting "not completed" for every case would achieve 85% accuracy while being completely useless. **AUC-ROC = 0.733** measures the model's ability to correctly rank a completed booking above a non-completed one — a meaningful metric independent of class distribution.
 
 ---
 
 ## Key Business Insights
 
-**1. Booking origin is the dominant signal.** Malaysia (23.9% importance) and Australia (6.4%) together explain ~30% of model decisions. BA's APAC-heavy booking base means regional marketing and UX differences have outsized impact on conversion.
+**1. Booking origin is the dominant signal.** Malaysia (23.9% importance) and Australia (6.4%) together explain ~30% of model decisions. BA's APAC-heavy booking base means regional conversion rates differ significantly.
 
-**2. Flight duration predicts commitment** (10.9% importance). Customers booking longer routes (>8 hrs) are more likely to complete — they've invested more consideration into the trip.
+**2. Flight duration predicts commitment** (10.9% importance). Customers booking longer routes are more likely to complete — long-haul travel requires more deliberate decision-making.
 
-**3. Internet vs. Mobile gap.** Internet bookings complete at a higher rate. Mobile may have checkout friction or be used more for browsing than committing.
+**3. Internet vs. Mobile channel gap.** Internet bookings complete at a higher rate than Mobile, suggesting potential UX friction in the mobile checkout experience.
 
-**4. Add-on selection is an early commitment signal.** Customers who select extra baggage, preferred seats, or meals show slightly higher completion rates — these add-ons require deliberate choices that signal purchase intent.
+**4. Add-on selection signals purchase intent.** Customers who select extra baggage, preferred seats, or meals show slightly higher completion rates — these choices indicate a more committed buyer.
 
-**5. Purchase lead time is highly skewed** (mean 85 days, max 867 days). Last-minute bookers (≤7 days) behave differently — they're likely to convert or not at all.
-
----
-
-## Dataset
-
-- **Source:** British Airways customer booking data (Forage Virtual Internship)
-- **Records:** 50,000 bookings
-- **Target:** `booking_complete` (0=not completed, 1=completed)
-- **Class ratio:** 85% : 15% (imbalanced)
-- **No missing values**
-- **Train/Test:** 80/20 stratified split
+**5. Purchase lead time matters.** Highly skewed (mean: 85 days, max: 867 days). Last-minute bookers (≤7 days) have different conversion behavior than advance planners.
 
 ---
 
@@ -138,9 +144,11 @@ With 85% of bookings not completed, a model that always predicts "not completed"
 ```
 British-Airways-Customer-Booking-Prediction/
 │
-├── ba_booking_prediction.ipynb     # Rebuilt notebook — full pipeline, no leakage
-├── customer_booking.csv            # Dataset
-├── key_insights_task2_BA.pdf       # Original task summary
+├── ba_booking_prediction.ipynb     # Full pipeline: EDA → feature engineering → modeling
+├── customer_booking.csv            # Dataset (50,000 records)
+├── fig1_eda.png                    # EDA visualizations
+├── fig2_evaluation.png             # ROC, PR curve, confusion matrix
+├── fig3_features.png               # Feature importance chart
 ├── requirements.txt                # Dependencies
 └── README.md
 ```
@@ -169,12 +177,17 @@ jupyter notebook ba_booking_prediction.ipynb
 
 ---
 
-## Limitations & Next Steps
+## Limitations & Future Work
 
-- **Threshold tuning:** Default threshold = 0.5. Lowering to 0.3 would increase recall further at cost of precision — worthwhile if catching more completions matters more than false positives.
-- **Try LightGBM** with `scale_pos_weight=(85/15)` — likely faster convergence and similar or better AUC.
-- **Missing features:** Price, route competition, customer history/loyalty tier, device type. These would likely be the strongest predictors and are absent from this dataset.
-- **Booking origin investigation:** The dominance of Malaysia/Australia may reflect dataset composition bias rather than generalizable booking behavior. Worth investigating with BA stakeholders.
+- **Threshold tuning:** Lowering the default threshold from 0.5 → 0.3 would increase recall at the cost of precision — useful if catching more completions is the priority.
+- **Try LightGBM** with `scale_pos_weight` — likely faster convergence with similar or better AUC.
+- **Missing features:** Price, route competition, customer loyalty tier, and device type would likely be strong predictors but are absent from this dataset.
+
+---
+
+## Certificate
+
+Completed as part of the [British Airways Data Science Virtual Experience](https://www.theforage.com/simulations/british-airways/data-science-yqoz) on Forage.
 
 ---
 
