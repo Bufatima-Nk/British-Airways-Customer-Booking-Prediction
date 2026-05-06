@@ -1,4 +1,4 @@
-# British Airways Customer Booking Prediction — Rebuilt
+# British Airways Customer Booking Prediction
 
 > Binary classification predicting booking completion on **50,000 BA records**. Rebuilt with a leak-free `ImbPipeline`, `class_weight='balanced'`, stratified cross-validation, and AUC-ROC evaluation — improving class 1 recall from **0.01 → 0.52** and AUC-ROC to **0.733**.
 
